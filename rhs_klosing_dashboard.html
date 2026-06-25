@@ -1,0 +1,1613 @@
+<!-- Chosen Palette: Emerald & Slate Premium -->
+<!-- Application Structure Plan:
+     Satu halaman interaktif (SPA) yang dioptimalkan untuk memantau performa penjualan harian, mingguan, dan bulanan dari data RHS Klosing.
+     Struktur dasbor ini dirancang dengan KPI finansial di baris teratas (Grid 3 Atas, 3 Bawah), dilanjutkan dengan filter dinamis, matriks angka detail per kategori/CS/bulan, serta tren visualisasi performa penjualan dan status pengiriman barang di bagian tengah. 
+     Struktur ini dipilih karena memudahkan pengambil keputusan (owner/manajer) untuk langsung melihat angka kunci kesehatan bisnis terlebih dahulu sebelum menggali rincian tren dan data mentah.
+-->
+<!-- Visualization & Content Choices:
+     1. KPI Cards -> Ringkasan metrik utama (Omset, COD, Iklan, Profit, CB JNT, Delivery Rate) -> Teks tebal & Unicode representatif -> Usabilitas cepat.
+     2. Matriks Angka Kinerja -> Grid informasi detail finansial per CS/Kategori/Bulan -> HTML Grid dinamis berbasis state -> Visualisasi data numerik komparatif.
+     3. Tren Omset & Profit -> Line Chart (Chart.js) -> Membandingkan omset kotor vs profit bersih dari waktu ke waktu -> Deteksi performa harian/bulanan.
+     4. Kontribusi Kategori Produk -> Doughnut Chart (Chart.js) -> Melihat proporsi kuantitas produk terlaris -> Pengelolaan inventaris.
+     5. Proporsi Status Akhir -> Doughnut Chart (Chart.js) -> Melihat rasio kesuksesan pengiriman (Diterima vs Retur vs On Going) -> Evaluasi kurir/COD.
+     6. Performa Ekspedisi -> Bar Chart (Chart.js) -> Membandingkan jumlah paket yang dikirim per kurir -> Pemilihan ekspedisi terbaik.
+-->
+<!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+<!DOCTYPE html>
+<html lang="id" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RHS aka LUX ALGO ID - Interactive Dashboard</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- PapaParse for CSV parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              900: '#14532d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    .dark ::-webkit-scrollbar-thumb {
+      background: #475569;
+    }
+    /* Glassmorphism adjustments */
+    .glass-panel {
+      backdrop-filter: blur(8px);
+    }
+    /* Chart Container Constraints */
+    .chart-container {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      margin-left: auto;
+      margin-right: auto;
+      height: 240px;
+      max-height: 240px;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-full flex flex-col transition-colors duration-200 dark:bg-slate-900 dark:text-slate-100">
+
+  <!-- Header Banner -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm dark:bg-slate-800 dark:border-slate-700">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <!-- Title Section -->
+      <div class="flex items-center gap-3">
+        <div class="p-2.5 bg-emerald-500 rounded-xl text-white shadow-lg shadow-emerald-500/20 text-2xl flex items-center justify-center">
+          📈
+        </div>
+        <div>
+          <h1 class="text-xl font-extrabold tracking-tight text-slate-900 dark:text-white">RHS KLOSING</h1>
+          <p class="text-xs font-semibold text-emerald-600 dark:text-emerald-400 tracking-wider uppercase">Interactive Analytics Dashboard</p>
+        </div>
+      </div>
+
+      <!-- Action & Import Buttons -->
+      <div class="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+        <!-- Live CSV Uploader -->
+        <label class="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition cursor-pointer text-sm font-semibold shadow-md shadow-emerald-600/10 active:scale-95">
+          <span>📁</span>
+          <span>Unggah CSV RHS</span>
+          <input type="file" id="csv-file-input" accept=".csv" class="hidden">
+        </label>
+
+        <!-- Dark/Light Mode Toggle -->
+        <button id="theme-toggle" class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-300 transition" aria-label="Toggle Theme">
+          <span id="theme-sun" class="hidden text-lg">☀️</span>
+          <span id="theme-moon" class="text-lg">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Notification Banner -->
+  <div id="alert-box" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
+    <div class="flex items-center justify-between p-4 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800">
+      <div class="flex items-center gap-3">
+        <span class="text-lg">✅</span>
+        <span id="alert-text" class="text-sm font-medium">Berhasil memuat data sampel! Silakan unggah file CSV asli Anda untuk melihat visualisasi data real.</span>
+      </div>
+      <button onclick="document.getElementById('alert-box').classList.add('hidden')" class="text-emerald-500 hover:text-emerald-700 font-bold text-sm">
+        ✖
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Content Wrapper -->
+  <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6">
+
+    <!-- KPI Section (Susunan Grid 3 Atas, 3 Bawah) -->
+    <section class="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <!-- Omset HPJ -->
+      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between dark:bg-slate-800 dark:border-slate-700 relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-6 text-7xl opacity-10 select-none group-hover:scale-110 transition duration-200">
+          💵
+        </div>
+        <div class="z-10">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Omset (HPJ)</span>
+          <span id="kpi-omset" class="text-xl sm:text-2xl font-bold tracking-tight block mt-1 text-slate-900 dark:text-white">Rp0</span>
+          <span class="text-[10px] text-slate-500 mt-2 block">Total Nilai Penjualan Produk</span>
+        </div>
+      </div>
+
+      <!-- Omset COD -->
+      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between dark:bg-slate-800 dark:border-slate-700 relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-6 text-7xl opacity-10 select-none group-hover:scale-110 transition duration-200">
+          📦
+        </div>
+        <div class="z-10">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Total COD</span>
+          <span id="kpi-cod" class="text-xl sm:text-2xl font-bold tracking-tight block mt-1 text-slate-900 dark:text-white">Rp0</span>
+          <span class="text-[10px] text-slate-500 mt-2 block">Omset + Ongkos Kirim</span>
+        </div>
+      </div>
+
+      <!-- Ads Spend (Iklan) -->
+      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between dark:bg-slate-800 dark:border-slate-700 relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-6 text-7xl opacity-10 select-none group-hover:scale-110 transition duration-200">
+          📢
+        </div>
+        <div class="z-10">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Biaya Iklan</span>
+          <span id="kpi-ads" class="text-xl sm:text-2xl font-bold tracking-tight block mt-1 text-red-600 dark:text-red-400">Rp0</span>
+          <span id="kpi-roas" class="text-[10px] text-slate-500 mt-2 block">ROAS: 0.0x</span>
+        </div>
+      </div>
+
+      <!-- Net Profit -->
+      <div class="bg-emerald-50 p-5 rounded-2xl border border-emerald-100 shadow-sm flex flex-col justify-between dark:bg-emerald-950/20 dark:border-emerald-900/30 relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-6 text-7xl opacity-10 select-none group-hover:scale-110 transition duration-200">
+          📈
+        </div>
+        <div class="z-10">
+          <span class="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Estimasi Profit</span>
+          <span id="kpi-profit" class="text-xl sm:text-2xl font-bold tracking-tight block mt-1 text-emerald-600 dark:text-emerald-400">Rp0</span>
+          <span id="kpi-margin" class="text-[10px] text-emerald-700/70 dark:text-emerald-400/70 mt-2 block">Margin: 0%</span>
+        </div>
+      </div>
+
+      <!-- CB JNT KPI Card -->
+      <div class="bg-indigo-50 p-5 rounded-2xl border border-indigo-100 shadow-sm flex flex-col justify-between dark:bg-indigo-950/20 dark:border-indigo-900/30 relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-6 text-7xl opacity-10 select-none group-hover:scale-110 transition duration-200">
+          💸
+        </div>
+        <div class="z-10">
+          <span class="text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">CB JNT</span>
+          <span id="kpi-cb-jnt" class="text-xl sm:text-2xl font-bold tracking-tight block mt-1 text-indigo-600 dark:text-indigo-400">Rp0</span>
+          <span class="text-[10px] text-indigo-700/70 dark:text-indigo-400/70 mt-2 block">Total Cashback J&T</span>
+        </div>
+      </div>
+
+      <!-- Delivery Rate (Logic Diperbarui & ID Diperkenalkan untuk Judul Dinamis!) -->
+      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between dark:bg-slate-800 dark:border-slate-700 relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-6 text-7xl opacity-10 select-none group-hover:scale-110 transition duration-200">
+          🚚
+        </div>
+        <div class="z-10">
+          <span id="kpi-delivery-title" class="text-xs font-semibold text-slate-400 uppercase tracking-wider block">Delivery Rate</span>
+          <span id="kpi-delivery" class="text-xl sm:text-2xl font-bold tracking-tight block mt-1 text-blue-600 dark:text-blue-400">0%</span>
+          <span id="kpi-delivery-detail" class="text-[10px] text-slate-500 mt-2 block">Diterima: 0% | Retur: 0% | On Going: 0%</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filters Panel -->
+    <section class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
+      <div class="flex items-center gap-2 mb-4 border-b border-slate-100 pb-3 dark:border-slate-700">
+        <span class="text-lg">🔍</span>
+        <h2 class="font-bold text-slate-900 dark:text-white">Filter Dashboard</h2>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <!-- Date Range Filter -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 mb-1.5 uppercase dark:text-slate-400">Rentang Waktu</label>
+          <div class="grid grid-cols-2 gap-2">
+            <input type="date" id="filter-date-start" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+            <input type="date" id="filter-date-end" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+          </div>
+        </div>
+
+        <!-- CS Filter -->
+        <div>
+          <label for="filter-cs" class="block text-xs font-bold text-slate-500 mb-1.5 uppercase dark:text-slate-400">Customer Service (CS)</label>
+          <select id="filter-cs" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+            <option value="ALL">Semua CS</option>
+          </select>
+        </div>
+
+        <!-- Category Filter -->
+        <div>
+          <label for="filter-category" class="block text-xs font-bold text-slate-500 mb-1.5 uppercase dark:text-slate-400">Kategori Item</label>
+          <select id="filter-category" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+            <option value="ALL">Semua Kategori</option>
+          </select>
+        </div>
+
+        <!-- Status Filter -->
+        <div>
+          <label for="filter-status" class="block text-xs font-bold text-slate-500 mb-1.5 uppercase dark:text-slate-400">Status Pengiriman</label>
+          <select id="filter-status" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+            <option value="ALL">Semua Status</option>
+            <option value="Diterima">Diterima</option>
+            <option value="Retur">Retur</option>
+            <option value="On Going">On Going</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center dark:border-slate-700">
+        <button id="reset-filters" class="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white transition">Reset Filter</button>
+        <span id="filtered-count" class="text-xs font-medium text-slate-400">Menampilkan 0 dari 0 baris data</span>
+      </div>
+    </section>
+
+    <!-- Visualisasi Angka dalam Grid Section -->
+    <section class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5 border-b border-slate-100 pb-3 dark:border-slate-700">
+        <div class="flex items-center gap-2">
+          <div class="p-1.5 bg-indigo-500/10 text-indigo-500 rounded-lg text-lg">
+            📊
+          </div>
+          <div>
+            <h3 class="font-bold text-base text-slate-900 dark:text-white">Matriks Angka Kinerja</h3>
+            <p class="text-xs text-slate-400">Akumulasi angka rincian finansial dipecah secara mendalam</p>
+          </div>
+        </div>
+        <!-- Selector Pengelompokan Grid -->
+        <div class="bg-slate-100 p-0.5 rounded-lg flex dark:bg-slate-700 self-start sm:self-auto">
+          <button id="grid-by-cs-btn" class="px-3.5 py-1 text-[10px] font-bold rounded-md bg-white text-slate-800 shadow dark:bg-slate-600 dark:text-white transition">Per CS</button>
+          <button id="grid-by-cat-btn" class="px-3.5 py-1 text-[10px] font-bold rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white transition">Per Kategori</button>
+          <button id="grid-by-month-btn" class="px-3.5 py-1 text-[10px] font-bold rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white transition">Per Bulan</button>
+        </div>
+      </div>
+
+      <!-- Grid Container -->
+      <div id="numerical-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <!-- Grid item akan dimasukkan di sini oleh JavaScript -->
+      </div>
+    </section>
+
+    <!-- Main Visualizations -->
+    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Left side charts: Sales Trend & CS Performance -->
+      <div class="lg:col-span-2 flex flex-col gap-6">
+        
+        <!-- Sales & Profit Trend -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="font-bold text-base text-slate-900 dark:text-white">Tren Omset & Profit Bersih</h3>
+              <p class="text-xs text-slate-400">Visualisasi fluktuasi closing harian</p>
+            </div>
+            <!-- Toggle Group -->
+            <div class="bg-slate-100 p-0.5 rounded-lg flex dark:bg-slate-700">
+              <button id="trend-daily-btn" class="px-3 py-1 text-[10px] font-bold rounded-md bg-white text-slate-800 shadow dark:bg-slate-600 dark:text-white">Harian</button>
+              <button id="trend-monthly-btn" class="px-3 py-1 text-[10px] font-bold rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white">Bulanan</button>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="trendChart"></canvas>
+          </div>
+        </div>
+
+        <!-- CS Performance Leaderboard -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <h3 class="font-bold text-base text-slate-900 dark:text-white">Leaderboard Customer Service</h3>
+              <p class="text-xs text-slate-400">Evaluasi performa CS berdasarkan volume closing & profitabilitas</p>
+            </div>
+          </div>
+          
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="text-slate-400 border-b border-slate-100 dark:border-slate-700 uppercase font-semibold">
+                  <th class="py-2.5">Peringkat</th>
+                  <th class="py-2.5">Nama CS</th>
+                  <th class="py-2.5 text-center">Closing</th>
+                  <th class="py-2.5 text-right">Total Omset</th>
+                  <th class="py-2.5 text-right">Profit Bersih</th>
+                  <th class="py-2.5 text-center">Rasio Retur</th>
+                </tr>
+              </thead>
+              <tbody id="cs-leaderboard-body" class="divide-y divide-slate-100 dark:divide-slate-700/50">
+                <!-- Data CS dinamis -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right side charts: Product category, courier efficiency, & tips -->
+      <div class="flex flex-col gap-6">
+
+        <!-- Product Category Breakdown -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700 flex flex-col justify-between">
+          <div>
+            <h3 class="font-bold text-base text-slate-900 dark:text-white">Kontribusi Kategori Produk</h3>
+            <p class="text-xs text-slate-400 mb-4">Pembagian unit terjual berdasarkan kategori</p>
+          </div>
+          <div class="chart-container flex items-center justify-center">
+            <canvas id="categoryChart"></canvas>
+          </div>
+        </div>
+
+        <!-- End Status Breakdown -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700 flex flex-col justify-between">
+          <div>
+            <h3 class="font-bold text-base text-slate-900 dark:text-white">Proporsi Status Akhir</h3>
+            <p class="text-xs text-slate-400 mb-4">Rasio paket terkirim sukses (Diterima) vs paket gagal (Retur)</p>
+          </div>
+          <div class="chart-container flex items-center justify-center">
+            <canvas id="statusChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Expedition & Returns Share -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm dark:bg-slate-800 dark:border-slate-700">
+          <div>
+            <h3 class="font-bold text-base text-slate-900 dark:text-white">Distribusi Ekspedisi</h3>
+            <p class="text-xs text-slate-400 mb-4">Porsi pengiriman kurir dan kesuksesannya</p>
+          </div>
+          <div class="chart-container">
+            <canvas id="expeditionChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Quick AI Insights / Business Tips -->
+        <div class="bg-slate-900 text-white p-5 rounded-2xl shadow-xl shadow-slate-900/10 dark:bg-slate-950 dark:shadow-none">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="text-lg">💡</span>
+            <h4 class="font-bold text-sm tracking-tight">Rekomendasi Strategis</h4>
+          </div>
+          <div class="space-y-3" id="ai-insights-container">
+            <!-- Dinamis sesuai data -->
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Detailed Raw Table Section -->
+    <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden dark:bg-slate-800 dark:border-slate-700">
+      <div class="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 dark:border-slate-700">
+        <div>
+          <h3 class="font-bold text-base text-slate-900 dark:text-white">Rincian Data Klosing</h3>
+          <p class="text-xs text-slate-400">Seluruh catatan transaksi real dari berkas CSV</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Table Search -->
+          <div class="relative w-full sm:w-64">
+            <input type="text" id="table-search" placeholder="🔍 Cari nama, item, alamat, CS..." class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-emerald-500 focus:outline-none dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+          </div>
+          <!-- CSV Exporter -->
+          <button id="export-btn" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5 shadow dark:bg-slate-700 dark:hover:bg-slate-600">
+            <span>📥</span>
+            <span>Ekspor Hasil</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Table Wrapper -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-xs whitespace-nowrap">
+          <thead class="bg-slate-50/50 text-slate-400 dark:bg-slate-700/30 uppercase font-semibold border-b border-slate-100 dark:border-slate-700">
+            <tr>
+              <th class="px-5 py-3">Tanggal & Jam</th>
+              <th class="px-5 py-3">CS</th>
+              <th class="px-5 py-3">Customer</th>
+              <th class="px-5 py-3">Nama Item</th>
+              <th class="px-5 py-3 text-right">COD</th>
+              <th class="px-5 py-3 text-right">HPJ</th>
+              <th class="px-5 py-3 text-right text-indigo-500 dark:text-indigo-400">CB JNT</th>
+              <th class="px-5 py-3 text-right">Profit</th>
+              <th class="px-5 py-3">Status</th>
+              <th class="px-5 py-3">Ekspedisi</th>
+            </tr>
+          </thead>
+          <tbody id="closing-table-body" class="divide-y divide-slate-100 dark:divide-slate-700/50">
+            <!-- Baris data diisi oleh JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Table Pagination Footer -->
+      <div class="px-5 py-3.5 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between dark:bg-slate-700/10 dark:border-slate-700">
+        <div class="flex items-center gap-1.5 text-xs text-slate-500">
+          <span>Baris per halaman:</span>
+          <select id="table-limit" class="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-xs text-slate-700 dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200">
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="prev-page" class="p-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-100 transition disabled:opacity-50 disabled:pointer-events-none dark:border-slate-600 dark:hover:bg-slate-700">◀</button>
+          <span id="page-indicator" class="text-xs font-semibold text-slate-600 dark:text-slate-400">Hal 1 dari 1</span>
+          <button id="next-page" class="p-1 border border-slate-200 rounded text-slate-500 hover:bg-slate-100 transition disabled:opacity-50 disabled:pointer-events-none dark:border-slate-600 dark:hover:bg-slate-700">▶</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="bg-white border-t border-slate-200 py-6 dark:bg-slate-800 dark:border-slate-700 mt-auto">
+    <div class="max-w-7xl mx-auto px-4 text-center text-xs text-slate-400">
+      <p>&copy; 2026 RHS Klosing. Dashboard dianalisis secara lokal di browser Anda demi privasi dan keamanan data.</p>
+    </div>
+  </footer>
+
+  <!-- Script Dashboard -->
+  <script>
+    // ----------------------------------------------------
+    // 1. DATA SAMPEL BERDASARKAN FORMAT & SNIPPET CSV USER
+    // ----------------------------------------------------
+    const SAMPLE_CSV_DATA = `TANGGAL,JAM,NAMA CS,NAMA CUST,NO TLP,ALAMAT,NAMA ITEM,COD,HPJ,ONGKIR,HPP&PAKING,GROSS,CB JNT,BULAN,PERIODE,QTY,Input/Belum,STATUS,IKLAN,EST PROFIT (After Ads & HF),EXPEDISI,END STATUS,AWB,KATEGORI
+20/02/2026,14:19:24,Qwert 77,PA SIMBOLON,85272179725,"sumut, kabupaten dairi, kecamatan sumbul, desa tanjung beringin, dusun 1",SPION MOTOR YAMAHA JUPITER MX 135 HITAM,150000,99000,51000,25000,74000,15300,Februari,Maret,1,Sudah Input,On Going,31000,58300,SPX,Diterima,SPXID063009443832,SPION MOTOR
+20/02/2026,16:48:22,Qwert 77,AGUS PURNOMO,85194575469,DUSUN KUWARINGAN DS MLANCU RT 3 RW 3 KEC KANGDANGAN KAN KEDIRI,SPION MOTOR HONDA GREEND MERAH,135000,99000,36000,25000,74000,,Februari,,1,,On Going,25000,49000,J&T,Diterima,,SPION MOTOR
+15/03/2026,10:20:11,Anna,Budi Wicaksono,81234567890,"Kec. Jebres, Surakarta, Jawa Tengah",KAOS ANAK HITAM (M),120000,89000,31000,20000,69000,9000,Maret,,1,,On Going,15000,63000,J&T,Diterima,JT920392039,KAOS ANAK
+18/03/2026,11:45:00,Anna,Siti Aminah,81298765432,"Kec. Coblong, Bandung, Jawa Barat",KAOS ANAK COKELAT (S),120000,89000,31000,20000,69000,9000,Maret,,1,,On Going,15000,15000,J&T,Retur,,KAOS ANAK
+10/04/2026,09:12:30,Candra,Rian Hidayat,82133445566,"Kec. Klojen, Malang, Jawa Timur",SPINER COVER ENGINE HONDA BEAT (MERAH),114000,99000,15000,,99000,4500,April,,1,,On Going,20000,53500,J&T,Diterima,,SPINER MOTOR
+22/04/2026,14:50:11,Qwert 77,Dewi Kartika,81344556677,"Sumatera Utara, Medan",SPION MOTOR HONDA MERAH,150000,99000,51000,25000,74000,15300,April,,1,,On Going,30000,59300,SPX,Diterima,,SPION MOTOR
+05/05/2026,16:15:22,Moch Suparno,Hendra Wijaya,81288990011,"Sikka, Nusa Tenggara Timur",SPINER COVER ENGINE HONDA BEAT (MERAH),114000,99000,15000,,99000,4500,Mei,,1,,On Going,20000,53500,J&T,Diterima,,SPINER MOTOR
+12/05/2026,11:30:45,Moch Suparno,Lina Herlina,81277889900,"Kec. Alok, Kab. Sikka, NTT",KAOS ANAK BIRU (L),174000,99000,75000,25000,74000,22500,Mei,,1,,On Going,25000,71500,J&T,On Going,,KAOS ANAK
+19/06/2026,16:57:10,Moch Suparno,Anna,81237447022,"jln wairumbia RT,004/ RW 004 Gang srikaya kelurahan kota Uneng kec. Alok kab.sikka Nusa Tenggara Timur","PAKET KAOS ANAK HITAM, COKELAT (M)",174000,99000,75000,,99000,22500,Juni,,1,,On Going,,121500,J&T,Diterima,,KAOS ANAK
+19/06/2026,17:00:27,Moch Suparno,Candra,82386909937,"Ampang Gadang 1, Desa Maek, Jalan Ampang Gadang 1 sebelum lapangan bola, Kec. Bukik Barisan, Kab. Lima Puluh Kota, Sumatera Barat","PAKET KAOS ANAK BIRU, HIJAU (M)",134000,99000,35000,,99000,10500,Juni,,1,,On Going,,109500,J&T,Diterima,,KAOS ANAK
+19/06/2026,17:02:20,Moch Suparno,saipudin,81369620992,"Pagar Dewa, Buku",SPION MOTOR YAMAHA HITAM,150000,99000,51000,25000,74000,15300,Juni,,1,,On Going,25000,64300,SPX,On Going,,SPION MOTOR
+20/06/2026,10:15:00,Candra,Wawan Kurniawan,81233221144,"Banjarmasin, Kalimantan Selatan",SPION MOTOR YAMAHA HITAM,150000,99000,51000,25000,74000,15300,Juni,,1,,On Going,20000,69300,SPX,Diterima,,SPION MOTOR
+21/06/2026,11:40:00,Qwert 77,Yulianti,81299887766,"Tangerang, Banten",KAOS ANAK MERAH (M),120000,89000,31000,20000,69000,9000,Juni,,1,,On Going,15000,63000,J&T,Diterima,,KAOS ANAK
+22/06/2026,14:22:15,Anna,Eko Prasetyo,81377443322,"Semarang, Jawa Tengah",SPINER COVER ENGINE HONDA BEAT (MERAH),114000,99000,15000,20000,79000,4500,Juni,,1,,On Going,15000,68500,J&T,Diterima,,SPINER MOTOR
+22/06/2026,15:05:00,Candra,Fitri Handayani,82155667788,"Pontianak, Kalimantan Barat",KAOS ANAK HITAM (L),120000,89000,31000,20000,69000,9000,Juni,,1,,On Going,15000,15000,J&T,Retur,,KAOS ANAK`;
+
+    // State global dashboard
+    let rawTransactions = [];
+    let filteredTransactions = [];
+    let isTrendDaily = true; // True = Daily, False = Monthly
+    let gridDimension = 'cs'; // 'cs', 'kategori', 'bulan'
+
+    // Chart instances
+    let trendChartInstance = null;
+    let categoryChartInstance = null;
+    let statusChartInstance = null; // New chart instance for End Status
+    let expeditionChartInstance = null;
+
+    // Pagination Table
+    let currentPage = 1;
+    let tableLimit = 10;
+
+    // ----------------------------------------------------
+    // 2. HELPER UTILITY & PARSING DATA
+    // ----------------------------------------------------
+    function parseRupiah(value) {
+      if (!value) return 0;
+      if (typeof value === 'number') return value;
+      
+      let str = value.toString().trim();
+      let isNegative = false;
+      
+      // Mengatasi penulisan akuntansi negatif seperti (15.000) atau -15.000
+      if (str.startsWith('(') && str.endsWith(')')) {
+        isNegative = true;
+        str = str.slice(1, -1);
+      } else if (str.startsWith('-')) {
+        isNegative = true;
+      }
+      
+      // Bersihkan simbol mata uang Rp atau IDR
+      str = str.replace(/rp|idr/gi, '').trim();
+      
+      // Deteksi format desimal Indonesia (ribuan titik, desimal koma, misal: 150.000,50)
+      if (str.includes('.') && str.includes(',')) {
+        str = str.replace(/\./g, '').replace(/,/g, '.');
+      } else if (str.includes(',')) {
+        const parts = str.split(',');
+        if (parts[parts.length - 1].length === 3) {
+          str = str.replace(/,/g, '');
+        } else {
+          str = str.replace(/,/g, '.');
+        }
+      } else if (str.includes('.')) {
+        const parts = str.split('.');
+        if (parts[parts.length - 1].length === 3) {
+          str = str.replace(/\./g, '');
+        }
+      }
+      
+      const parsed = parseFloat(str.replace(/[^0-9.-]/g, ''));
+      if (isNaN(parsed)) return 0;
+      return isNegative ? -parsed : parsed;
+    }
+
+    function formatRupiah(amount) {
+      const isNeg = amount < 0;
+      const absAmount = Math.abs(amount);
+      const formatted = new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        maximumFractionDigits: 0
+      }).format(absAmount);
+      return isNeg ? `-${formatted}` : formatted;
+    }
+
+    function parseCustomDate(dateStr) {
+      if (!dateStr) return null;
+      const parts = dateStr.trim().split('/');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+      }
+      return new Date(dateStr);
+    }
+
+    function formatDateToYYYYMMDD(date) {
+      if (!date || isNaN(date)) return '';
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    // Mengambil nilai kolom secara case-insensitive & bebas whitespace untuk keandalan maksimum
+    function getRowValueSafely(row, possibleNames) {
+      for (let name of possibleNames) {
+        if (row[name] !== undefined) return row[name];
+        const key = Object.keys(row).find(k => k.trim().toLowerCase() === name.toLowerCase());
+        if (key) return row[key];
+      }
+      return undefined;
+    }
+
+    // ----------------------------------------------------
+    // 3. LOGIKA UNGGAPAN & PROSES DATA
+    // ----------------------------------------------------
+    function processParsedData(parsed) {
+      const data = parsed.data;
+      rawTransactions = [];
+
+      data.forEach((row, index) => {
+        const tanggalVal = getRowValueSafely(row, ['TANGGAL', 'Tanggal']);
+        const csVal = getRowValueSafely(row, ['NAMA CS', 'Nama CS', 'CS']);
+        if (!tanggalVal || !csVal) return;
+
+        const dateObj = parseCustomDate(tanggalVal);
+        const cod = parseRupiah(getRowValueSafely(row, ['COD', 'Cod']));
+        const hpj = parseRupiah(getRowValueSafely(row, ['HPJ', 'Hpj']));
+        const ongkir = parseRupiah(getRowValueSafely(row, ['ONGKIR', 'Ongkir']));
+        const hppAndPaking = parseRupiah(getRowValueSafely(row, ['HPP&PAKING', 'HPP & PAKING', 'Hpp & Paking', 'Hpp&Paking']));
+        const gross = parseRupiah(getRowValueSafely(row, ['GROSS', 'Gross']));
+        const cbJnt = parseRupiah(getRowValueSafely(row, ['CB JNT', 'Cb Jnt', 'CB J&T', 'Cb J&t']));
+        const qty = parseRupiah(getRowValueSafely(row, ['QTY', 'Qty'])) || 1;
+        const iklan = parseRupiah(getRowValueSafely(row, ['IKLAN', 'Iklan']));
+
+        const resolvedHpj = hpj || (cod - ongkir);
+        
+        // Prioritas 1: Baca langsung dari kolom profit spreadsheet Anda jika terisi.
+        // Prioritas 2 (Fallback): Hitung dengan rumus presisi: HPJ - HPP&PAKING - IKLAN + CB JNT.
+        const csvEstProfit = getRowValueSafely(row, ['EST PROFIT (After Ads & HF)', 'EST PROFIT', 'Estimasi Profit', 'Profit']);
+        const calculatedEstProfit = resolvedHpj - hppAndPaking - iklan + cbJnt;
+        const estProfit = (csvEstProfit !== undefined && csvEstProfit !== '') 
+          ? parseRupiah(csvEstProfit) 
+          : calculatedEstProfit;
+        
+        let kategori = (getRowValueSafely(row, ['KATEGORI', 'Kategori']) || 'LAIN-LAIN').toString().trim().toUpperCase();
+        if (!kategori || kategori === 'LAIN-LAIN') {
+          const itemName = (getRowValueSafely(row, ['NAMA ITEM', 'Nama Item', 'Item']) || '').toString().toUpperCase();
+          if (itemName.includes('SPION')) kategori = 'SPION MOTOR';
+          else if (itemName.includes('KAOS') || itemName.includes('BAJU')) kategori = 'KAOS ANAK';
+          else if (itemName.includes('SPINER')) kategori = 'SPINER MOTOR';
+          else kategori = 'LAIN-LAIN';
+        }
+
+        let endStatusVal = getRowValueSafely(row, ['END STATUS', 'End Status', 'Status Akhir']);
+        if (endStatusVal === undefined || endStatusVal === null || endStatusVal.toString().trim() === '') {
+          endStatusVal = 'On Going';
+        } else {
+          endStatusVal = endStatusVal.toString().trim();
+        }
+
+        let statusVal = getRowValueSafely(row, ['STATUS', 'Status']);
+        if (statusVal === undefined || statusVal === null || statusVal.toString().trim() === '') {
+          statusVal = 'On Going';
+        } else {
+          statusVal = statusVal.toString().trim();
+        }
+
+        const transObj = {
+          tanggalOriginal: tanggalVal,
+          date: dateObj,
+          jam: getRowValueSafely(row, ['JAM', 'Jam']) || '00:00:00',
+          cs: csVal.toString().trim(),
+          cust: (getRowValueSafely(row, ['NAMA CUST', 'Nama Cust', 'Customer']) || 'Umum').toString().trim(),
+          telp: getRowValueSafely(row, ['NO TLP', 'No Tlp', 'No HP']) || '',
+          alamat: getRowValueSafely(row, ['ALAMAT', 'Alamat']) || '',
+          item: getRowValueSafely(row, ['NAMA ITEM', 'Nama Item', 'Item']) || '',
+          cod: cod,
+          hpj: resolvedHpj, 
+          ongkir: ongkir,
+          hppAndPaking: hppAndPaking,
+          gross: gross,
+          cbJnt: cbJnt,
+          bulan: getRowValueSafely(row, ['BULAN', 'Bulan']) || 'Unknown',
+          qty: qty,
+          status: statusVal,
+          iklan: iklan,
+          estProfit: estProfit,
+          expedisi: (getRowValueSafely(row, ['EXPEDISI', 'Expedisi', 'Ekspedisi']) || 'UNKNOWN').toString().trim().toUpperCase(),
+          endStatus: endStatusVal,
+          awb: getRowValueSafely(row, ['AWB', 'Awb', 'No Resi']) || '',
+          kategori: kategori
+        };
+
+        rawTransactions.push(transObj);
+      });
+
+      rawTransactions.sort((a, b) => (a.date || 0) - (b.date || 0));
+      populateFilterOptions();
+      
+      if (rawTransactions.length > 0) {
+        const minDate = rawTransactions[0].date;
+        const maxDate = rawTransactions[rawTransactions.length - 1].date;
+        document.getElementById('filter-date-start').value = formatDateToYYYYMMDD(minDate);
+        document.getElementById('filter-date-end').value = formatDateToYYYYMMDD(maxDate);
+      }
+
+      applyFiltersAndRefresh();
+    }
+
+    function populateFilterOptions() {
+      const csSelect = document.getElementById('filter-cs');
+      const catSelect = document.getElementById('filter-category');
+
+      const uniqueCS = [...new Set(rawTransactions.map(t => t.cs))].sort();
+      const uniqueCat = [...new Set(rawTransactions.map(t => t.kategori))].sort();
+
+      csSelect.innerHTML = '<option value="ALL">Semua CS</option>';
+      catSelect.innerHTML = '<option value="ALL">Semua Kategori</option>';
+
+      uniqueCS.forEach(cs => {
+        const opt = document.createElement('option');
+        opt.value = cs;
+        opt.textContent = cs;
+        csSelect.appendChild(opt);
+      });
+
+      uniqueCat.forEach(cat => {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        opt.textContent = cat;
+        catSelect.appendChild(opt);
+      });
+    }
+
+    // ----------------------------------------------------
+    // 4. SISTEM FILTER & STATISTIK KPI
+    // ----------------------------------------------------
+    function applyFiltersAndRefresh() {
+      const startVal = document.getElementById('filter-date-start').value;
+      const endVal = document.getElementById('filter-date-end').value;
+      const csVal = document.getElementById('filter-cs').value;
+      const catVal = document.getElementById('filter-category').value;
+      const statusVal = document.getElementById('filter-status').value;
+      const searchVal = document.getElementById('table-search').value.toLowerCase();
+
+      const startDate = startVal ? new Date(startVal + "T00:00:00") : null;
+      const endDate = endVal ? new Date(endVal + "T23:59:59") : null;
+
+      // 1. Filter dasar tanpa membatasi "Status Pengiriman" terlebih dahulu
+      const baseFiltered = rawTransactions.filter(t => {
+        if (startDate && t.date && t.date < startDate) return false;
+        if (endDate && t.date && t.date > endDate) return false;
+        if (csVal !== 'ALL' && t.cs !== csVal) return false;
+        if (catVal !== 'ALL' && t.kategori !== catVal) return false;
+
+        if (searchVal) {
+          const inCust = t.cust.toLowerCase().includes(searchVal);
+          const inItem = t.item.toLowerCase().includes(searchVal);
+          const inAlamat = t.alamat.toLowerCase().includes(searchVal);
+          const inCs = t.cs.toLowerCase().includes(searchVal);
+          const inAwb = t.awb.toLowerCase().includes(searchVal);
+          if (!inCust && !inItem && !inAlamat && !inCs && !inAwb) return false;
+        }
+
+        return true;
+      });
+
+      // 2. Saring hasil akhir menggunakan filter status untuk data tabel & chart finansial
+      filteredTransactions = baseFiltered.filter(t => {
+        if (statusVal !== 'ALL') {
+          const matchStatus = t.endStatus.toLowerCase() === statusVal.toLowerCase() || 
+                              t.status.toLowerCase() === statusVal.toLowerCase();
+          if (!matchStatus) return false;
+        }
+        return true;
+      });
+
+      document.getElementById('filtered-count').textContent = `Menampilkan ${filteredTransactions.length} dari ${rawTransactions.length} baris data`;
+      currentPage = 1;
+
+      calculateKPIs(baseFiltered); // Mengoper dataset yang belum terfilter status
+      renderNumericalGrid();
+      renderTrendChart();
+      renderCSLeaderboard();
+      renderCategoryChart();
+      renderStatusChart();
+      renderExpeditionChart();
+      renderClosingTable();
+      generateAIInsights();
+    }
+
+    function calculateKPIs(baseFiltered) {
+      let totalHPJ = 0;
+      let totalCOD = 0;
+      let totalAds = 0;
+      let totalProfit = 0;
+      let totalCbJnt = 0;
+
+      // KPI finansial dihitung dari data transaksi yang benar-benar tersaring (filteredTransactions)
+      filteredTransactions.forEach(t => {
+        totalHPJ += t.hpj;
+        totalCOD += t.cod;
+        totalAds += t.iklan;
+        totalProfit += t.estProfit;
+        totalCbJnt += t.cbJnt;
+      });
+
+      document.getElementById('kpi-omset').textContent = formatRupiah(totalHPJ);
+      document.getElementById('kpi-cod').textContent = formatRupiah(totalCOD);
+      document.getElementById('kpi-ads').textContent = formatRupiah(totalAds);
+      document.getElementById('kpi-profit').textContent = formatRupiah(totalProfit);
+      document.getElementById('kpi-cb-jnt').textContent = formatRupiah(totalCbJnt);
+
+      const roas = totalAds > 0 ? (totalHPJ / totalAds).toFixed(1) : 'N/A';
+      document.getElementById('kpi-roas').textContent = `ROAS: ${roas}x dari Ads`;
+
+      const margin = totalHPJ > 0 ? ((totalProfit / totalHPJ) * 100).toFixed(0) : 0;
+      document.getElementById('kpi-margin').textContent = `Margin Profit: ${margin}% dari Omset`;
+
+      // Perhitungan distribusi status berdasarkan baseFiltered (bebas dari filter status itu sendiri)
+      const baseTotal = baseFiltered ? baseFiltered.length : 0;
+      let baseDelivered = 0;
+      let baseRetur = 0;
+      let baseOnGoing = 0;
+
+      if (baseFiltered) {
+        baseFiltered.forEach(t => {
+          const endS = t.endStatus ? t.endStatus.toLowerCase() : 'on going';
+          if (endS === 'diterima') {
+            baseDelivered++;
+          } else if (endS === 'retur') {
+            baseRetur++;
+          } else {
+            baseOnGoing++;
+          }
+        });
+      }
+
+      const deliveryRate = baseTotal > 0 ? ((baseDelivered / baseTotal) * 100).toFixed(1) : "0.0";
+      const returnRate = baseTotal > 0 ? ((baseRetur / baseTotal) * 100).toFixed(1) : "0.0";
+      const onGoingRate = baseTotal > 0 ? ((baseOnGoing / baseTotal) * 100).toFixed(1) : "0.0";
+
+      // Logika dinamis baru sesuai instruksi user:
+      // - Jika filter status adalah "Semua Status" (ALL), tampilkan angka mutlak 100.0%
+      // - Jika filter status adalah "Diterima", tampilkan proporsi % yang diterima terhadap total kiriman
+      // - Jika filter status adalah "Retur", tampilkan proporsi % yang retur terhadap total kiriman
+      // - Jika filter status adalah "On Going", tampilkan proporsi % yang sedang dikirim terhadap total kiriman
+      const statusFilter = document.getElementById('filter-status').value;
+      let displayRate = "100.0";
+      let displayTitle = "Delivery Rate";
+
+      if (statusFilter === 'ALL') {
+        displayRate = "100.0";
+        displayTitle = "Delivery Rate";
+      } else if (statusFilter === 'Diterima') {
+        displayRate = deliveryRate;
+        displayTitle = "Delivery Rate (Diterima)";
+      } else if (statusFilter === 'Retur') {
+        displayRate = returnRate;
+        displayTitle = "Retur Rate";
+      } else if (statusFilter === 'On Going') {
+        displayRate = onGoingRate;
+        displayTitle = "On Going Rate";
+      }
+
+      document.getElementById('kpi-delivery-title').textContent = displayTitle;
+      document.getElementById('kpi-delivery').textContent = `${displayRate}%`;
+      document.getElementById('kpi-delivery-detail').textContent = `Diterima: ${deliveryRate}% | Retur: ${returnRate}% | On Going: ${onGoingRate}%`;
+    }
+
+    // ----------------------------------------------------
+    // VISUALISASI MATRIKS ANGKA DETAIL (GRID)
+    // ----------------------------------------------------
+    function renderNumericalGrid() {
+      const container = document.getElementById('numerical-grid');
+      container.innerHTML = '';
+
+      if (filteredTransactions.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-full text-center py-8 text-slate-400 dark:text-slate-500">
+            Tidak ada data untuk ditampilkan dalam grid dengan filter saat ini.
+          </div>
+        `;
+        return;
+      }
+
+      const grouped = {};
+
+      filteredTransactions.forEach(t => {
+        let key = '';
+        if (gridDimension === 'cs') {
+          key = t.cs;
+        } else if (gridDimension === 'kategori') {
+          key = t.kategori;
+        } else {
+          key = t.bulan;
+        }
+
+        if (!grouped[key]) {
+          grouped[key] = {
+            name: key,
+            closing: 0,
+            omset: 0,
+            cbJnt: 0,
+            iklan: 0,
+            hpp: 0,
+            profit: 0
+          };
+        }
+
+        grouped[key].closing++;
+        grouped[key].omset += t.hpj;
+        grouped[key].cbJnt += t.cbJnt;
+        grouped[key].iklan += t.iklan;
+        grouped[key].hpp += t.hppAndPaking;
+        grouped[key].profit += t.estProfit;
+      });
+
+      const items = Object.values(grouped).sort((a, b) => b.omset - a.omset);
+
+      items.forEach(item => {
+        const margin = item.omset > 0 ? ((item.profit / item.omset) * 100).toFixed(0) : 0;
+
+        const card = document.createElement('div');
+        card.className = "bg-slate-50/50 p-4 rounded-xl border border-slate-100 dark:bg-slate-800/45 dark:border-slate-700/60 flex flex-col justify-between hover:shadow-md transition duration-200";
+        
+        card.innerHTML = `
+          <div class="border-b border-slate-100 dark:border-slate-700/60 pb-2 mb-3 flex items-start justify-between">
+            <div>
+              <span class="text-xs font-bold text-slate-400 dark:text-slate-500 block uppercase tracking-tight">
+                ${gridDimension === 'cs' ? 'Customer Service' : gridDimension === 'kategori' ? 'Kategori Produk' : 'Periode Bulan'}
+              </span>
+              <h4 class="font-extrabold text-sm text-slate-800 dark:text-slate-100 truncate max-w-[150px]" title="${item.name}">${item.name}</h4>
+            </div>
+            <div class="flex flex-col items-end">
+              <span class="bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                ${item.closing} Closing
+              </span>
+              <span class="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Margin: ${margin}%</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-x-3 gap-y-2 text-xs mb-3">
+            <div>
+              <span class="text-[10px] text-slate-400 block">Omset (HPJ)</span>
+              <span class="font-bold text-slate-700 dark:text-slate-300">${formatRupiah(item.omset)}</span>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block">CB JNT</span>
+              <span class="font-semibold text-indigo-600 dark:text-indigo-400">${formatRupiah(item.cbJnt)}</span>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block">Biaya Iklan</span>
+              <span class="font-semibold text-rose-600 dark:text-rose-400">${formatRupiah(item.iklan)}</span>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block">HPP & Packing</span>
+              <span class="font-semibold text-slate-600 dark:text-slate-400">${formatRupiah(item.hpp)}</span>
+            </div>
+          </div>
+
+          <div class="bg-emerald-500/10 dark:bg-emerald-500/5 p-2 rounded-lg border border-emerald-500/10 flex justify-between items-center">
+            <span class="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 tracking-wider uppercase">Est. Profit</span>
+            <span class="text-xs font-black text-emerald-600 dark:text-emerald-400">${formatRupiah(item.profit)}</span>
+          </div>
+        `;
+        
+        container.appendChild(card);
+      });
+    }
+
+    // ----------------------------------------------------
+    // 5. RENDERING GRAFIK & VISUALISASI (CHART.JS)
+    // ----------------------------------------------------
+    function renderTrendChart() {
+      const ctx = document.getElementById('trendChart').getContext('2d');
+      if (trendChartInstance) {
+        trendChartInstance.destroy();
+      }
+
+      const groupedData = {};
+
+      filteredTransactions.forEach(t => {
+        let key = '';
+        if (isTrendDaily) {
+          key = t.date ? t.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : 'Unknown';
+        } else {
+          key = t.date ? t.date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : 'Unknown';
+        }
+
+        if (!groupedData[key]) {
+          groupedData[key] = { omset: 0, profit: 0 };
+        }
+        groupedData[key].omset += t.hpj;
+        groupedData[key].profit += t.estProfit;
+      });
+
+      const labels = Object.keys(groupedData);
+      const omsetData = labels.map(l => groupedData[l].omset);
+      const profitData = labels.map(l => groupedData[l].profit);
+
+      const isDark = document.documentElement.classList.contains('dark');
+      const textCol = isDark ? '#94a3b8' : '#64748b';
+      const gridCol = isDark ? '#334155' : '#f1f5f9';
+
+      trendChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Total Omset (HPJ)',
+              data: omsetData,
+              borderColor: '#10b981',
+              backgroundColor: 'rgba(16, 185, 129, 0.05)',
+              borderWidth: 3,
+              fill: true,
+              tension: 0.3
+            },
+            {
+              label: 'Profit Bersih',
+              data: profitData,
+              borderColor: '#6366f1',
+              backgroundColor: 'rgba(99, 102, 241, 0.05)',
+              borderWidth: 3,
+              fill: true,
+              tension: 0.3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: { color: textCol, font: { family: 'Inter', weight: '600' } }
+            },
+            tooltip: {
+              padding: 12,
+              backgroundColor: isDark ? '#1e293b' : '#ffffff',
+              titleColor: isDark ? '#ffffff' : '#0f172a',
+              bodyColor: isDark ? '#94a3b8' : '#475569',
+              borderColor: isDark ? '#334155' : '#e2e8f0',
+              borderWidth: 1,
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label + ': ' + formatRupiah(context.raw);
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              grid: { color: gridCol },
+              ticks: {
+                color: textCol,
+                callback: value => value >= 1000000 ? (value / 1000000).toFixed(1) + 'M' : value >= 1000 ? (value / 1000).toFixed(0) + 'K' : value
+              }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: textCol }
+            }
+          }
+        }
+      });
+    }
+
+    function renderCSLeaderboard() {
+      const csData = {};
+
+      filteredTransactions.forEach(t => {
+        if (!csData[t.cs]) {
+          csData[t.cs] = {
+            name: t.cs,
+            closing: 0,
+            omset: 0,
+            profit: 0,
+            delivered: 0,
+            retur: 0
+          };
+        }
+        csData[t.cs].closing += 1;
+        csData[t.cs].omset += t.hpj;
+        csData[t.cs].profit += t.estProfit;
+
+        const endS = t.endStatus.toLowerCase();
+        if (endS === 'diterima') csData[t.cs].delivered++;
+        if (endS === 'retur') csData[t.cs].retur++;
+      });
+
+      const csLeaderboard = Object.values(csData).sort((a, b) => b.omset - a.omset);
+      const body = document.getElementById('cs-leaderboard-body');
+      body.innerHTML = '';
+
+      if (csLeaderboard.length === 0) {
+        body.innerHTML = `<tr><td colspan="6" class="text-center py-6 text-slate-400">Tidak ada data Customer Service</td></tr>`;
+        return;
+      }
+
+      csLeaderboard.forEach((cs, idx) => {
+        const returnRate = cs.closing > 0 ? ((cs.retur / cs.closing) * 100).toFixed(0) + '%' : '0%';
+
+        let rankBadge = '';
+        if (idx === 0) rankBadge = '🥇';
+        else if (idx === 1) rankBadge = '🥈';
+        else if (idx === 2) rankBadge = '🥉';
+        else rankBadge = `<span class="w-5 h-5 flex items-center justify-center rounded-full bg-slate-100 text-slate-500 font-bold text-[10px] dark:bg-slate-700 dark:text-slate-400">${idx + 1}</span>`;
+
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-slate-50/55 dark:hover:bg-slate-700/25 transition';
+        row.innerHTML = `
+          <td class="py-3 font-semibold flex items-center gap-2">${rankBadge}</td>
+          <td class="py-3 font-semibold text-slate-900 dark:text-white">${cs.name}</td>
+          <td class="py-3 text-center font-bold">${cs.closing}</td>
+          <td class="py-3 text-right text-slate-700 dark:text-slate-300 font-semibold">${formatRupiah(cs.omset)}</td>
+          <td class="py-3 text-right text-emerald-600 dark:text-emerald-400 font-bold">${formatRupiah(cs.profit)}</td>
+          <td class="py-3 text-center">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${cs.retur > 0 ? 'bg-red-50 text-red-600 dark:bg-red-950/20 dark:text-red-400' : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400'}">${returnRate}</span>
+          </td>
+        `;
+        body.appendChild(row);
+      });
+    }
+
+    function renderCategoryChart() {
+      const ctx = document.getElementById('categoryChart').getContext('2d');
+      if (categoryChartInstance) {
+        categoryChartInstance.destroy();
+      }
+
+      const catCounts = {};
+      filteredTransactions.forEach(t => {
+        catCounts[t.kategori] = (catCounts[t.kategori] || 0) + t.qty;
+      });
+
+      const labels = Object.keys(catCounts);
+      const data = Object.values(catCounts);
+
+      const isDark = document.documentElement.classList.contains('dark');
+      const textCol = isDark ? '#94a3b8' : '#64748b';
+
+      categoryChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: data,
+            backgroundColor: ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#14b8a6', '#8b5cf6'],
+            borderWidth: isDark ? 2 : 1,
+            borderColor: isDark ? '#1e293b' : '#ffffff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { boxWidth: 12, color: textCol, font: { family: 'Inter', size: 10 } }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return ` ${context.label}: ${context.raw} unit`;
+                }
+              }
+            }
+          },
+          cutout: '65%'
+        }
+      });
+    }
+
+    function renderStatusChart() {
+      const ctx = document.getElementById('statusChart').getContext('2d');
+      if (statusChartInstance) {
+        statusChartInstance.destroy();
+      }
+
+      const statusCounts = {};
+      filteredTransactions.forEach(t => {
+        const status = t.endStatus || 'On Going';
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+      });
+
+      const labels = Object.keys(statusCounts);
+      const data = Object.values(statusCounts);
+
+      const isDark = document.documentElement.classList.contains('dark');
+      const textCol = isDark ? '#94a3b8' : '#64748b';
+
+      const backgroundColors = labels.map(label => {
+        const lowerLabel = label.toLowerCase();
+        if (lowerLabel.includes('diterima')) return '#10b981'; 
+        if (lowerLabel.includes('retur')) return '#ef4444';    
+        return '#f59e0b';                                       
+      });
+
+      statusChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: data,
+            backgroundColor: backgroundColors,
+            borderWidth: isDark ? 2 : 1,
+            borderColor: isDark ? '#1e293b' : '#ffffff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { boxWidth: 12, color: textCol, font: { family: 'Inter', size: 10 } }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return ` ${context.label}: ${context.raw} transaksi`;
+                }
+              }
+            }
+          },
+          cutout: '65%'
+        }
+      });
+    }
+
+    function renderExpeditionChart() {
+      const ctx = document.getElementById('expeditionChart').getContext('2d');
+      if (expeditionChartInstance) {
+        expeditionChartInstance.destroy();
+      }
+
+      const expeditionData = {};
+      filteredTransactions.forEach(t => {
+        const exp = t.expedisi || 'LAINNYA';
+        if (!expeditionData[exp]) {
+          expeditionData[exp] = { total: 0, delivered: 0, retur: 0 };
+        }
+        expeditionData[exp].total++;
+        if (t.endStatus.toLowerCase() === 'diterima') expeditionData[exp].delivered++;
+        if (t.endStatus.toLowerCase() === 'retur') expeditionData[exp].retur++;
+      });
+
+      const labels = Object.keys(expeditionData);
+      const deliveredData = labels.map(l => expeditionData[l].delivered);
+      const returData = labels.map(l => expeditionData[l].retur);
+
+      const isDark = document.documentElement.classList.contains('dark');
+      const textCol = isDark ? '#94a3b8' : '#64748b';
+      const gridCol = isDark ? '#334155' : '#f1f5f9';
+
+      expeditionChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Diterima',
+              data: deliveredData,
+              backgroundColor: '#10b981'
+            },
+            {
+              label: 'Retur',
+              data: returData,
+              backgroundColor: '#ef4444'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { boxWidth: 12, color: textCol, font: { family: 'Inter', size: 10 } }
+            }
+          },
+          scales: {
+            y: {
+              stacked: true,
+              grid: { color: gridCol },
+              ticks: { color: textCol }
+            },
+            x: {
+              stacked: true,
+              grid: { display: false },
+              ticks: { color: textCol }
+            }
+          }
+        }
+      });
+    }
+
+    // ----------------------------------------------------
+    // TABEL TRANSAKSI DETIL
+    // ----------------------------------------------------
+    function renderClosingTable() {
+      const body = document.getElementById('closing-table-body');
+      body.innerHTML = '';
+
+      if (filteredTransactions.length === 0) {
+        body.innerHTML = `<tr><td colspan="10" class="text-center py-8 text-slate-400">Tidak ada transaksi yang cocok dengan filter</td></tr>`;
+        document.getElementById('page-indicator').textContent = 'Hal 1 dari 1';
+        document.getElementById('prev-page').disabled = true;
+        document.getElementById('next-page').disabled = true;
+        return;
+      }
+
+      const totalPages = Math.ceil(filteredTransactions.length / tableLimit);
+      if (currentPage > totalPages) currentPage = totalPages || 1;
+
+      const startIndex = (currentPage - 1) * tableLimit;
+      const endIndex = Math.min(startIndex + tableLimit, filteredTransactions.length);
+
+      const paginatedData = filteredTransactions.slice(startIndex, endIndex);
+
+      paginatedData.forEach(t => {
+        let statusBadge = '';
+        const lowerEnd = t.endStatus.toLowerCase();
+        if (lowerEnd === 'diterima') {
+          statusBadge = '<span class="px-2.5 py-1 text-[10px] font-extrabold rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 flex items-center gap-1 w-max">🟢 Diterima</span>';
+        } else if (lowerEnd === 'retur') {
+          statusBadge = '<span class="px-2.5 py-1 text-[10px] font-extrabold rounded-full bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400 flex items-center gap-1 w-max">🔴 Retur</span>';
+        } else {
+          statusBadge = '<span class="px-2.5 py-1 text-[10px] font-extrabold rounded-full bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400 flex items-center gap-1 w-max">🟡 On Going</span>';
+        }
+
+        const dateFormatted = t.date ? t.date.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }) : t.tanggalOriginal;
+
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-slate-50/50 dark:hover:bg-slate-700/20 transition';
+        row.innerHTML = `
+          <td class="px-5 py-3 text-slate-500 dark:text-slate-400">${dateFormatted} <span class="text-[10px] block opacity-80">${t.jam}</span></td>
+          <td class="px-5 py-3 font-semibold text-slate-800 dark:text-slate-200">${t.cs}</td>
+          <td class="px-5 py-3 font-medium text-slate-900 dark:text-white">${t.cust} <span class="text-[10px] block text-slate-400 font-normal">${t.telp || '-'}</span></td>
+          <td class="px-5 py-3 max-w-xs truncate text-slate-600 dark:text-slate-300" title="${t.item}">${t.item}</td>
+          <td class="px-5 py-3 text-right font-semibold">${formatRupiah(t.cod)}</td>
+          <td class="px-5 py-3 text-right font-semibold text-slate-600 dark:text-slate-300">${formatRupiah(t.hpj)}</td>
+          <td class="px-5 py-3 text-right font-semibold text-indigo-600 dark:text-indigo-400">${formatRupiah(t.cbJnt)}</td>
+          <td class="px-5 py-3 text-right font-extrabold text-emerald-600 dark:text-emerald-400">${formatRupiah(t.estProfit)}</td>
+          <td class="px-5 py-3">${statusBadge}</td>
+          <td class="px-5 py-3"><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-extrabold dark:bg-slate-700 dark:text-slate-300">${t.expedisi}</span></td>
+        `;
+        body.appendChild(row);
+      });
+
+      document.getElementById('page-indicator').textContent = `Hal ${currentPage} dari ${totalPages}`;
+      document.getElementById('prev-page').disabled = currentPage === 1;
+      document.getElementById('next-page').disabled = currentPage === totalPages;
+    }
+
+    // ----------------------------------------------------
+    // REKOMENDASI INSIGHTS BISNIS
+    // ----------------------------------------------------
+    function generateAIInsights() {
+      const container = document.getElementById('ai-insights-container');
+      container.innerHTML = '';
+
+      if (filteredTransactions.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-400">Menunggu data klosing untuk memberikan analisis...</p>`;
+        return;
+      }
+
+      let totalHPJ = 0;
+      let totalAds = 0;
+      let totalProfit = 0;
+      let delivered = 0;
+      let retur = 0;
+      const csSales = {};
+
+      const totalShipments = filteredTransactions.length;
+
+      filteredTransactions.forEach(t => {
+        totalHPJ += t.hpj;
+        totalAds += t.iklan;
+        totalProfit += t.estProfit;
+
+        const endS = t.endStatus.toLowerCase();
+        if (endS === 'diterima') delivered++;
+        if (endS === 'retur') retur++;
+
+        csSales[t.cs] = (csSales[t.cs] || 0) + t.hpj;
+      });
+
+      const deliverySuccessRate = totalShipments > 0 ? (delivered / totalShipments) * 100 : 0;
+      const roas = totalAds > 0 ? (totalHPJ / totalAds) : 0;
+
+      const insights = [];
+
+      if (roas < 2 && totalAds > 0) {
+        insights.push({
+          type: 'danger',
+          title: 'Efisiensi Iklan Rendah',
+          desc: `ROAS Anda saat ini berada di angka ${roas.toFixed(1)}x. Pertimbangkan untuk mengevaluasi ulang budget iklan.`
+        });
+      } else if (roas >= 4) {
+        insights.push({
+          type: 'success',
+          title: 'Sinyal Scale Up Iklan',
+          desc: `Kinerja iklan sangat baik dengan ROAS mencapai ${roas.toFixed(1)}x. Anda bisa meningkatkan budget iklan secara berkala.`
+        });
+      }
+
+      if (deliverySuccessRate < 80 && totalShipments > 5) {
+        insights.push({
+          type: 'warning',
+          title: 'Tingkat Retur Tinggi',
+          desc: `Rasio barang terkirim sukses hanya ${deliverySuccessRate.toFixed(1)}%. CS disarankan konfirmasi ulang pesanan COD sebelum dikirim.`
+        });
+      } else {
+        insights.push({
+          type: 'success',
+          title: 'Delivery Rate Bagus',
+          desc: `Rasio pengiriman sukses Anda solid (${deliverySuccessRate.toFixed(1)}%). Pertahankan standar konfirmasi pesanan!`
+        });
+      }
+
+      const bestCS = Object.entries(csSales).sort((a, b) => b[1] - a[1])[0];
+      if (bestCS) {
+        insights.push({
+          type: 'info',
+          title: 'Apresiasi Customer Service',
+          desc: `CS <b>${bestCS[0]}</b> mendominasi omset saat ini dengan menyumbang penjualan senilai ${formatRupiah(bestCS[1])}.`
+        });
+      }
+
+      insights.forEach(ins => {
+        const item = document.createElement('div');
+        item.className = 'p-3 rounded-xl text-xs flex flex-col gap-1 border transition';
+        
+        if (ins.type === 'danger') {
+          item.className += ' bg-rose-500/10 border-rose-500/30 text-rose-200';
+        } else if (ins.type === 'warning') {
+          item.className += ' bg-amber-500/10 border-amber-500/30 text-amber-200';
+        } else if (ins.type === 'success') {
+          item.className += ' bg-emerald-500/10 border-emerald-500/30 text-emerald-200';
+        } else {
+          item.className += ' bg-blue-500/10 border-blue-500/30 text-blue-200';
+        }
+
+        item.innerHTML = `
+          <span class="font-bold tracking-tight text-white">${ins.title}</span>
+          <p class="opacity-90 leading-relaxed">${ins.desc}</p>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    // ----------------------------------------------------
+    // 8. EVENT LISTENERS & SETUP
+    // ----------------------------------------------------
+    function setupEventListeners() {
+      document.getElementById('csv-file-input').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: function(results) {
+            processParsedData(results);
+            const alertBox = document.getElementById('alert-box');
+            document.getElementById('alert-text').textContent = `Sukses memuat ${rawTransactions.length} transaksi dari file "${file.name}" secara otomatis!`;
+            alertBox.classList.remove('hidden');
+          }
+        });
+      });
+
+      document.getElementById('filter-date-start').addEventListener('change', applyFiltersAndRefresh);
+      document.getElementById('filter-date-end').addEventListener('change', applyFiltersAndRefresh);
+      document.getElementById('filter-cs').addEventListener('change', applyFiltersAndRefresh);
+      document.getElementById('filter-category').addEventListener('change', applyFiltersAndRefresh);
+      document.getElementById('filter-status').addEventListener('change', applyFiltersAndRefresh);
+      document.getElementById('table-search').addEventListener('input', applyFiltersAndRefresh);
+
+      document.getElementById('reset-filters').addEventListener('click', function() {
+        if (rawTransactions.length > 0) {
+          const minDate = rawTransactions[0].date;
+          const maxDate = rawTransactions[rawTransactions.length - 1].date;
+          document.getElementById('filter-date-start').value = formatDateToYYYYMMDD(minDate);
+          document.getElementById('filter-date-end').value = formatDateToYYYYMMDD(maxDate);
+        }
+        document.getElementById('filter-cs').value = 'ALL';
+        document.getElementById('filter-category').value = 'ALL';
+        document.getElementById('filter-status').value = 'ALL';
+        document.getElementById('table-search').value = '';
+        applyFiltersAndRefresh();
+      });
+
+      document.getElementById('trend-daily-btn').addEventListener('click', function() {
+        isTrendDaily = true;
+        this.className = "px-3 py-1 text-[10px] font-bold rounded-md bg-white text-slate-800 shadow dark:bg-slate-600 dark:text-white";
+        document.getElementById('trend-monthly-btn').className = "px-3 py-1 text-[10px] font-bold rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white";
+        renderTrendChart();
+      });
+
+      document.getElementById('trend-monthly-btn').addEventListener('click', function() {
+        isTrendDaily = false;
+        this.className = "px-3 py-1 text-[10px] font-bold rounded-md bg-white text-slate-800 shadow dark:bg-slate-600 dark:text-white";
+        document.getElementById('trend-daily-btn').className = "px-3 py-1 text-[10px] font-bold rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white";
+        renderTrendChart();
+      });
+
+      const btnCs = document.getElementById('grid-by-cs-btn');
+      const btnCat = document.getElementById('grid-by-cat-btn');
+      const btnMonth = document.getElementById('grid-by-month-btn');
+
+      function resetGridButtons() {
+        const inactiveClass = "px-3.5 py-1 text-[10px] font-bold rounded-md text-slate-500 hover:text-slate-800 dark:text-slate-300 dark:hover:text-white transition animate-none shadow-none bg-transparent";
+        btnCs.className = inactiveClass;
+        btnCat.className = inactiveClass;
+        btnMonth.className = inactiveClass;
+      }
+
+      btnCs.addEventListener('click', function() {
+        gridDimension = 'cs';
+        resetGridButtons();
+        this.className = "px-3.5 py-1 text-[10px] font-bold rounded-md bg-white text-slate-800 shadow dark:bg-slate-600 dark:text-white transition";
+        renderNumericalGrid();
+      });
+
+      btnCat.addEventListener('click', function() {
+        gridDimension = 'kategori';
+        resetGridButtons();
+        this.className = "px-3.5 py-1 text-[10px] font-bold rounded-md bg-white text-slate-800 shadow dark:bg-slate-600 dark:text-white transition";
+        renderNumericalGrid();
+      });
+
+      btnMonth.addEventListener('click', function() {
+        gridDimension = 'bulan';
+        resetGridButtons();
+        this.className = "px-3.5 py-1 text-[10px] font-bold rounded-md bg-white text-slate-800 shadow dark:bg-slate-600 dark:text-white transition";
+        renderNumericalGrid();
+      });
+
+      document.getElementById('table-limit').addEventListener('change', function(e) {
+        tableLimit = parseInt(e.target.value);
+        currentPage = 1;
+        renderClosingTable();
+      });
+
+      document.getElementById('prev-page').addEventListener('click', function() {
+        if (currentPage > 1) {
+          currentPage--;
+          renderClosingTable();
+        }
+      });
+
+      document.getElementById('next-page').addEventListener('click', function() {
+        const totalPages = Math.ceil(filteredTransactions.length / tableLimit);
+        if (currentPage < totalPages) {
+          currentPage++;
+          renderClosingTable();
+        }
+      });
+
+      document.getElementById('export-btn').addEventListener('click', function() {
+        if (filteredTransactions.length === 0) return;
+        
+        const csvRows = [];
+        const headers = ['Tanggal', 'Jam', 'Nama CS', 'Customer', 'No HP', 'Alamat', 'Item', 'COD', 'HPJ', 'CB JNT', 'Iklan', 'Profit', 'Kurir', 'Status'];
+        csvRows.push(headers.join(','));
+
+        filteredTransactions.forEach(t => {
+          const row = [
+            t.tanggalOriginal,
+            t.jam,
+            `"${t.cs.replace(/"/g, '""')}"`,
+            `"${t.cust.replace(/"/g, '""')}"`,
+            `"${t.telp}"`,
+            `"${t.alamat.replace(/"/g, '""')}"`,
+            `"${t.item.replace(/"/g, '""')}"`,
+            t.cod,
+            t.hpj,
+            t.cbJnt,
+            t.iklan,
+            t.estProfit,
+            t.expedisi,
+            t.endStatus
+          ];
+          csvRows.push(row.join(','));
+        });
+
+        const csvContent = "data:text/csv;charset=utf-8," + csvRows.join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `filtered_closing_rhs_${new Date().toISOString().slice(0,10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      });
+
+      const themeToggle = document.getElementById('theme-toggle');
+      themeToggle.addEventListener('click', function() {
+        const isDark = document.documentElement.classList.toggle('dark');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+        updateThemeIcons(isDark);
+        renderTrendChart();
+        renderCategoryChart();
+        renderStatusChart();
+        renderExpeditionChart();
+        renderNumericalGrid();
+      });
+
+      const savedTheme = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+        document.documentElement.classList.add('dark');
+        updateThemeIcons(true);
+      } else {
+        updateThemeIcons(false);
+      }
+    }
+
+    // Mengganti icon matahari/bulan
+    function updateThemeIcons(isDark) {
+      const sunIcon = document.getElementById('theme-sun');
+      const moonIcon = document.getElementById('theme-moon');
+      if (isDark) {
+        sunIcon.classList.remove('hidden');
+        moonIcon.classList.add('hidden');
+      } else {
+        sunIcon.classList.add('hidden');
+        moonIcon.classList.remove('hidden');
+      }
+    }
+
+    // Initialize Page
+    window.onload = function() {
+      setupEventListeners();
+      
+      const parsedSample = Papa.parse(SAMPLE_CSV_DATA, {
+        header: true,
+        skipEmptyLines: true
+      });
+      processParsedData(parsedSample);
+      document.getElementById('alert-box').classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>
